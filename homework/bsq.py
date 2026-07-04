@@ -52,13 +52,15 @@ class BSQ(torch.nn.Module):
         self.down_projection_layer: torch.nn.Conv2d = torch.nn.Conv2d(
             in_channels=embedding_dim,
             out_channels=codebook_bits,
-            kernel_size=1
+            kernel_size=3,
+            padding=1
         )
 
         self.up_projection: torch.nn.Conv2d = torch.nn.Conv2d(
             in_channels=codebook_bits,
             out_channels=embedding_dim,
-            kernel_size=1
+            kernel_size=3,
+            padding=1
         )
 
     def encode(self, x: torch.Tensor) -> torch.Tensor:

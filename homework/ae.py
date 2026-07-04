@@ -196,7 +196,7 @@ class PatchDecoder(torch.nn.Module):
         output_padding = 100 % patch_size, 150 % patch_size
 
         layers = [
-            DecoderBlock(
+            EncoderBlock(
                 latent_dim,
                 latent_dim // 2,
                 3,
