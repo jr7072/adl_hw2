@@ -170,7 +170,7 @@ class PatchEncoder(torch.nn.Module):
                             latent_dim // 2,
                             patch_size,
                             patch_size,
-                            non_linearity=torch.nn.LeakyReLU # ty: ignore
+                            non_linearity=torch.nn.GELU # ty: ignore
                         ),
             EncoderBlock(latent_dim // 2,
                             latent_dim,
@@ -201,7 +201,7 @@ class PatchDecoder(torch.nn.Module):
                 latent_dim // 2,
                 3,
                 padding=1,
-                non_linearity=torch.nn.LeakyReLU # ty: ignore =
+                non_linearity=torch.nn.GELU # ty: ignore =
             ),
             DecoderBlock(
                 latent_dim // 2,
