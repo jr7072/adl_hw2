@@ -167,10 +167,16 @@ class PatchEncoder(torch.nn.Module):
 
         layers = [
             EncoderBlock(3,
-                            latent_dim // 4,
+                            latent_dim // 8,
                             patch_size,
                             patch_size,
                             non_linearity=torch.nn.GELU # ty: ignore
+                        ),
+            EncoderBlock(latent_dim // 8,
+                            latent_dim // 4,
+                            3,
+                            padding=1,
+                            non_linearity=torch.nn.GELU
                         ),
             EncoderBlock(latent_dim // 4,
                             latent_dim // 2,
@@ -216,8 +222,14 @@ class PatchDecoder(torch.nn.Module):
                             padding=1,
                             non_linearity=torch.nn.GELU
                         ),
+            EncoderBlock(latent_dim // 4,
+                            latent_dim // 8,
+                            3,
+                            padding=1,
+                            non_linearity=torch.nn.GELU
+                        ),
             DecoderBlock(
-                latent_dim // 4,
+                latent_dim // 8,
                 3, # back to original channels
                 kernel_size=patch_size,
                 stride=patch_size,
