@@ -1,3 +1,5 @@
+from multiprocessing import Value
+from unittest.mock import patch
 import abc
 
 import torch
@@ -161,29 +163,29 @@ class PatchEncoder(torch.nn.Module):
                     It can make later parts of the homework easier (reusable components).
     """
 
-    def __init__(self, patch_size: int, latent_dim: int):
+    def __init__(self, latent_dim: int, latent_shape: tuple[int, int]):
+
         super().__init__()
 
-
         layers = [
-            EncoderBlock(3,
-                            latent_dim // 4,
-                            patch_size,
-                            patch_size,
+            EncoderBlock(in_channels=3,
+                            out_channels=latent_dim // 4,
+                            kernel_size=2,
+                            stride=2,
                             non_linearity=torch.nn.GELU # ty: ignore
                         ),
-            EncoderBlock(latent_dim // 4,
-                            latent_dim // 2,
-                            3,
-                            padding=1,
-                            non_linearity=torch.nn.GELU
+            EncoderBlock(in_channels=latent_dim // 4,
+                            out_channels=latent_dim // 2,
+                            kernel_size=3,
+                            stride=2,
+                            non_linearity=torch.nn.GELU # ty: ignore
                         ),
-            EncoderBlock(latent_dim // 2,
-                            latent_dim,
-                            3,
-                            padding=1,
-                            non_linearity=torch.nn.GELU
-                        )
+            EncoderBlock(in_channels=latent_dim // 2,
+                            out_channels=latent_dim,
+                            kernel_size=3,
+                            non_linearity=torch.nn.GELU # ty: ignore
+                        ),
+            torch.nn.AdaptiveAvgPool2d(output_size=latent_shape)
             
         ]
 
@@ -198,31 +200,31 @@ class PatchEncoder(torch.nn.Module):
         return self.encoder(transposed_vector)
         
 class PatchDecoder(torch.nn.Module):
-    def __init__(self, patch_size: int, latent_dim: int):
+    def __init__(self, latent_dim: int, latent_out_shape: tuple[int, int]):
+
         super().__init__()
 
-        output_padding = 100 % patch_size, 150 % patch_size
-
         layers = [
-            EncoderBlock(
-                latent_dim,
-                latent_dim // 2,
-                3,
-                padding=1,
-                non_linearity=torch.nn.GELU # ty: ignore =
-            ),
-            EncoderBlock(latent_dim // 2,
-                            latent_dim // 4,
-                            3,
-                            padding=1,
-                            non_linearity=torch.nn.GELU
-                        ),
+            torch.nn.AdaptiveAvgPool2d(output_size=latent_out_shape),
             DecoderBlock(
-                latent_dim // 4,
-                3, # back to original channels
-                kernel_size=patch_size,
-                stride=patch_size,
-                output_padding=output_padding
+                in_channels=latent_dim,
+                out_channels=latent_dim // 2,
+                kernel_size=3,
+                non_linearity=torch.nn.GELU # ty: ignore
+            ),
+            DecoderBlock(
+                in_channels=latent_dim // 2,
+                out_channels=latent_dim // 4,
+                kernel_size=3,
+                stride=2,
+                output_padding=(1, 0),
+                non_linearity=torch.nn.GELU # ty: ignore
+            ),
+            DecoderBlock(
+                in_channels=latent_dim // 4,
+                out_channels=3, # back to original channels
+                kernel_size=2,
+                stride=2
             )
         ]
 
@@ -253,8 +255,16 @@ class PatchAutoEncoder(torch.nn.Module, PatchAutoEncoderBase):
     def __init__(self, patch_size: int = 5, latent_dim: int = 128):
         super().__init__()
 
-        self.encoder = PatchEncoder(patch_size, latent_dim)
-        self.decoder = PatchDecoder(patch_size, latent_dim)
+        if (100 % patch_size != 0) or (150 % patch_size != 0):
+            raise ValueError("invalid patch size")
+        
+        latent_shape = (100 // patch_size, 150 // patch_size)
+        latent_out_shape = (22, 35)
+
+        self.encoder = PatchEncoder(latent_dim=latent_dim,
+                                        latent_shape=latent_shape)
+        self.decoder = PatchDecoder(latent_dim=latent_dim,
+                                        latent_out_shape=latent_out_shape)
 
         self.model = torch.nn.Sequential(
             self.encoder,
