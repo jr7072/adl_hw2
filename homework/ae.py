@@ -1,3 +1,4 @@
+from unittest import skip
 from multiprocessing import Value
 from unittest.mock import patch
 import abc
@@ -118,10 +119,21 @@ class EncoderBlock(torch.nn.Module):
             non_linearity()
         ]
 
+        self.skip_connection = torch.nn.Identity()
+        
+        if in_channels != out_channels:
+            self.skip_connection = torch.nn.Conv2d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=1,
+                stride=2,
+                padding=0
+            )
+
         self.block = torch.nn.Sequential(*layers)
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.block(x)
+        return self.block(x) + self.skip_connection(x)
 
 class DecoderBlock(torch.nn.Module):
 
@@ -132,6 +144,7 @@ class DecoderBlock(torch.nn.Module):
                     stride: int=1,
                     padding: int=0,
                     output_padding: tuple[int, int]=(0, 0),
+                    skip_output_padding: tuple[int, int]=(0,0),
                     non_linearity: torch.nn.Module=torch.nn.Identity # ty: ignore
                  ):
 
@@ -149,12 +162,23 @@ class DecoderBlock(torch.nn.Module):
             non_linearity()
         ]
 
+        self.skip_connection = torch.nn.Identity()
+
+        if in_channels != out_channels:
+            self.skip_connection = torch.nn.ConvTranspose2d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=1,
+                stride=2,
+                output_padding=skip_output_padding
+            )
+
         self.block = torch.nn.Sequential(
             *layers
         )
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.block(x)
+        return self.block(x) + self.skip_connection(x)
 
 
 class PatchEncoder(torch.nn.Module):
@@ -169,24 +193,19 @@ class PatchEncoder(torch.nn.Module):
 
         layers = [
             EncoderBlock(in_channels=3,
-                            out_channels=latent_dim // 4,
-                            kernel_size=2,
-                            stride=2,
-                            non_linearity=torch.nn.GELU # ty: ignore
-                        ),
-            EncoderBlock(in_channels=latent_dim // 4,
                             out_channels=latent_dim // 2,
-                            kernel_size=3,
+                            kernel_size=2,
                             stride=2,
                             non_linearity=torch.nn.GELU # ty: ignore
                         ),
             EncoderBlock(in_channels=latent_dim // 2,
                             out_channels=latent_dim,
                             kernel_size=3,
+                            stride=2,
+                            padding=1,
                             non_linearity=torch.nn.GELU # ty: ignore
                         ),
             torch.nn.AdaptiveAvgPool2d(output_size=latent_shape)
-            
         ]
 
         self.encoder = torch.nn.Sequential(
@@ -206,25 +225,23 @@ class PatchDecoder(torch.nn.Module):
 
         layers = [
             torch.nn.AdaptiveAvgPool2d(output_size=latent_out_shape),
+            torch.nn.GELU(),
             DecoderBlock(
                 in_channels=latent_dim,
                 out_channels=latent_dim // 2,
                 kernel_size=3,
+                stride=2,
+                padding=1,
+                output_padding=(1, 0),
+                skip_output_padding=(1, 0),
                 non_linearity=torch.nn.GELU # ty: ignore
             ),
             DecoderBlock(
                 in_channels=latent_dim // 2,
-                out_channels=latent_dim // 4,
-                kernel_size=3,
-                stride=2,
-                output_padding=(1, 0),
-                non_linearity=torch.nn.GELU # ty: ignore
-            ),
-            DecoderBlock(
-                in_channels=latent_dim // 4,
                 out_channels=3, # back to original channels
                 kernel_size=2,
-                stride=2
+                stride=2,
+                skip_output_padding=(1, 1)
             )
         ]
 
@@ -259,7 +276,7 @@ class PatchAutoEncoder(torch.nn.Module, PatchAutoEncoderBase):
             raise ValueError("invalid patch size")
         
         latent_shape = (100 // patch_size, 150 // patch_size)
-        latent_out_shape = (22, 35)
+        latent_out_shape = (25, 38)
 
         self.encoder = PatchEncoder(latent_dim=latent_dim,
                                         latent_shape=latent_shape)
