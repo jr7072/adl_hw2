@@ -117,6 +117,7 @@ class EncoderBlock(torch.nn.Module):
                 stride,
                 padding
             ),
+            torch.nn.BatchNorm2d(out_channels),
             non_linearity()
         ]
 
@@ -149,6 +150,7 @@ class DecoderBlock(torch.nn.Module):
                 padding=padding,
                 output_padding=output_padding
             ),
+            torch.nn.BatchNorm2d(out_channels),
             non_linearity()
         ]
 
@@ -184,7 +186,7 @@ class ResBlock(torch.nn.Module):
                     out_channels=in_channels,
                     kernel_size=3,
                     padding=1,
-                    non_linearity=torch.nn.ReLU # ty: ignore
+                    non_linearity=torch.nn.GELU # ty: ignore
                 )
             )
 
@@ -219,7 +221,7 @@ class PatchEncoder(torch.nn.Module):
                             out_channels=latent_dim,
                             kernel_size=2,
                             stride=2,
-                            non_linearity=torch.nn.GELU # ty: ignore
+                            non_linearity=torch.nn.GELU# ty: ignore
                         ),
             ResBlock(in_channels=latent_dim, n_layers=4),
             torch.nn.AdaptiveAvgPool2d(output_size=latent_shape)
@@ -255,9 +257,9 @@ class PatchDecoder(torch.nn.Module):
             ResBlock(in_channels=latent_dim // 2, n_layers=4),
             DecoderBlock(
                 in_channels=latent_dim // 2,
-                out_channels=3, # back to original channels
+                out_channels=3,
                 kernel_size=2,
-                stride=2,
+                stride=2
             )
         ]
 
