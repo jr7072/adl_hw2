@@ -12,6 +12,22 @@ def load() -> torch.nn.Module:
     return torch.load(model_path, weights_only=False)
 
 
+class PositionalEmbedding(torch.nn.Module):
+
+    def __init__(self, embedding_size: int=150):
+
+        super().__init__()
+
+        exponential = (torch.arange(0, embedding_size, 2) * -2) / embedding_size
+        freq_denom = torch.pow(10000, exponential)
+        self.register_buffer('freq_denom', freq_denom)
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+
+        freq = x[..., None] * self.freq_denom[None, ...]
+        return torch.concat([torch.sin(freq), torch.cos(freq)], dim=-1)
+
+
 class Autoregressive(abc.ABC):
     """
     Base class for all autoregressive models.
@@ -55,10 +71,74 @@ class AutoregressiveModel(torch.nn.Module, Autoregressive):
 
     def __init__(self, d_latent: int = 128, n_tokens: int = 2**10):
         super().__init__()
-        raise NotImplementedError()
+
+        # assets
+        self.volcab_size = n_tokens
+
+        # input handling
+        self.embeddings = torch.nn.Embedding(self.volcab_size, d_latent)
+        self.positional_embeddings = PositionalEmbedding(d_latent)
+        
+        # beginning token
+        self.bos_embedding = torch.nn.Parameter(torch.full((1, 1, d_latent), 1.))
+
+        #  transformer
+        decoder_layer = torch.nn.TransformerEncoderLayer(d_latent, nhead=8, batch_first=True)
+        self.transformer = torch.nn.TransformerEncoder(decoder_layer, num_layers=6)
+
+        # output
+        self.output_mlp = torch.nn.Linear(d_latent, self.volcab_size)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
-        raise NotImplementedError()
+        
+        # flatten per batch
+        x = x.flatten(start_dim=1)
 
-    def generate(self, B: int = 1, h: int = 30, w: int = 20, device=None) -> torch.Tensor:  # noqa
-        raise NotImplementedError()
+        # embed the tokens and add positional embeddings
+        x = self.embeddings(x) + self.positional_embeddings(x)
+
+        # expand bos embedding
+        batch_size = x.size(dim=0)
+        bos_vectors = self.bos_embedding.expand(batch_size, -1, -1)
+
+        # shift the embeddings by 1, remove the last embedding
+        x = torch.cat((bos_vectors, x[:, :-1, :]), dim=1)
+        
+        # generate a look ahead mask for the inputs
+        mask = torch.nn.Transformer.generate_square_subsequent_mask(
+                                                x.size(1)
+                                            ).to(
+                                                x.device
+                                            )
+        # pass it through transformer    
+        x = self.transformer(x, mask=mask, is_causal=True)
+
+        # get logits and reshape to image format
+        logits = self.output_mlp(x).view(-1, 20, 30, self.volcab_size)
+
+        return logits, {}
+
+    def generate(self, B: int = 1, h: int = 20, w: int = 30, device=None) -> torch.Tensor:  # noqa
+
+        batches = torch.tensor([]).to(device)
+    
+        for _ in range(B):
+
+            grid = torch.full((h, w), 0).to(device)
+
+            for h_idx in range(h):
+
+                for w_idx in range(w):
+
+                    grid_logits = self.forward(grid)[0]
+                    predictions = torch.squeeze(torch.argmax(grid_logits, dim=-1), dim=0)
+                    grid[h_idx, w_idx] = predictions[h_idx, w_idx]
+            
+            if batches.size(dim=0) == 0:
+        
+                batches = grid[None, :]
+                continue
+                
+            batches = torch.vstack((batches, grid[None, :]))
+                
+        return batches
