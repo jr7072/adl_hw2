@@ -39,7 +39,7 @@ def tokenize(tokenizer: Path, output: Path, *images_or_dirs: Path):
         x = torch.tensor(np.array(image), dtype=torch.uint8, device=device)
         with torch.inference_mode():
             x = x.float() / 255.0 - 0.5
-            cmp_image = tk_model.encode_index(x)
+            cmp_image = tk_model.encode_index(x[None, :])
             compressed_tensors.append(cmp_image.cpu())
 
     # Store the tensor in the lowest number of bits possible
