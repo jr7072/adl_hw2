@@ -95,6 +95,7 @@ class PatchAutoEncoderBase(abc.ABC):
         We will train the auto-encoder such that decode(encode(x)) ~= x.
         """
 
+
 class EncoderBlock(torch.nn.Module):
 
     def __init__(self,
@@ -119,21 +120,11 @@ class EncoderBlock(torch.nn.Module):
             non_linearity()
         ]
 
-        self.skip_connection = torch.nn.Identity()
-        
-        if in_channels != out_channels:
-            self.skip_connection = torch.nn.Conv2d(
-                in_channels=in_channels,
-                out_channels=out_channels,
-                kernel_size=1,
-                stride=2,
-                padding=0
-            )
-
         self.block = torch.nn.Sequential(*layers)
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.block(x) + self.skip_connection(x)
+        return self.block(x)
+
 
 class DecoderBlock(torch.nn.Module):
 
@@ -144,7 +135,6 @@ class DecoderBlock(torch.nn.Module):
                     stride: int=1,
                     padding: int=0,
                     output_padding: tuple[int, int]=(0, 0),
-                    skip_output_padding: tuple[int, int]=(0,0),
                     non_linearity: torch.nn.Module=torch.nn.Identity # ty: ignore
                  ):
 
@@ -162,22 +152,48 @@ class DecoderBlock(torch.nn.Module):
             non_linearity()
         ]
 
-        self.skip_connection = torch.nn.Identity()
-
-        if in_channels != out_channels:
-            self.skip_connection = torch.nn.ConvTranspose2d(
-                in_channels=in_channels,
-                out_channels=out_channels,
-                kernel_size=1,
-                stride=2,
-                output_padding=skip_output_padding
-            )
-
         self.block = torch.nn.Sequential(
             *layers
         )
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.block(x)
+
+
+class ResBlock(torch.nn.Module):
+
+    def __init__(self,
+        in_channels: int,
+        n_layers: int=1
+    ):
+
+        """
+            This block will be used to 
+            convolude among specific image patch
+            sizes.
+        """
+
+        super().__init__()
+
+        layers: list[torch.nn.Module] = list()
+        for _ in range(n_layers):
+
+            layers.append(
+                EncoderBlock(
+                    in_channels=in_channels,
+                    out_channels=in_channels,
+                    kernel_size=3,
+                    padding=1,
+                    non_linearity=torch.nn.ReLU # ty: ignore
+                )
+            )
+
+        self.block = torch.nn.Sequential(*layers)
+
+        # skip connection
+        self.skip_connection = torch.nn.Identity()
+    
+    def forward(self, x=torch.Tensor) -> torch.Tensor:
         return self.block(x) + self.skip_connection(x)
 
 
@@ -198,13 +214,14 @@ class PatchEncoder(torch.nn.Module):
                             stride=2,
                             non_linearity=torch.nn.GELU # ty: ignore
                         ),
+            ResBlock(in_channels=latent_dim // 2, n_layers=4),
             EncoderBlock(in_channels=latent_dim // 2,
                             out_channels=latent_dim,
-                            kernel_size=3,
+                            kernel_size=2,
                             stride=2,
-                            padding=1,
                             non_linearity=torch.nn.GELU # ty: ignore
                         ),
+            ResBlock(in_channels=latent_dim, n_layers=4),
             torch.nn.AdaptiveAvgPool2d(output_size=latent_shape)
         ]
 
@@ -226,22 +243,21 @@ class PatchDecoder(torch.nn.Module):
         layers = [
             torch.nn.AdaptiveAvgPool2d(output_size=latent_out_shape),
             torch.nn.GELU(),
+            ResBlock(in_channels=latent_dim, n_layers=4),
             DecoderBlock(
                 in_channels=latent_dim,
                 out_channels=latent_dim // 2,
-                kernel_size=3,
+                kernel_size=2,
                 stride=2,
-                padding=1,
-                output_padding=(1, 0),
-                skip_output_padding=(1, 0),
+                output_padding=(0, 1),
                 non_linearity=torch.nn.GELU # ty: ignore
             ),
+            ResBlock(in_channels=latent_dim // 2, n_layers=4),
             DecoderBlock(
                 in_channels=latent_dim // 2,
                 out_channels=3, # back to original channels
                 kernel_size=2,
                 stride=2,
-                skip_output_padding=(1, 1)
             )
         ]
 
@@ -276,7 +292,7 @@ class PatchAutoEncoder(torch.nn.Module, PatchAutoEncoderBase):
             raise ValueError("invalid patch size")
         
         latent_shape = (100 // patch_size, 150 // patch_size)
-        latent_out_shape = (25, 38)
+        latent_out_shape = (25, 37)
 
         self.encoder = PatchEncoder(latent_dim=latent_dim,
                                         latent_shape=latent_shape)
