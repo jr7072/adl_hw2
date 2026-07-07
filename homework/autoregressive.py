@@ -79,8 +79,10 @@ class AutoregressiveModel(torch.nn.Module, Autoregressive):
         self.embeddings = torch.nn.Embedding(self.volcab_size, d_latent)
         self.positional_embeddings = PositionalEmbedding(d_latent)
         
-        # beginning token
-        self.bos_embedding = torch.nn.Parameter(torch.full((1, 1, d_latent), 1.))
+        self.bos_embedding = torch.nn.Parameter(torch.empty(1, 1, d_latent))
+        
+        # Fills the tensor in-place using a uniform distribution
+        torch.nn.init.xavier_uniform_(self.bos_embedding)
 
         #  transformer
         decoder_layer = torch.nn.TransformerEncoderLayer(d_latent, nhead=8, batch_first=True)
