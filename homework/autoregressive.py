@@ -83,8 +83,8 @@ class AutoregressiveModel(torch.nn.Module, Autoregressive):
         self.bos_embedding = torch.nn.init.kaiming_normal_(bos_embedding)
     
         #  transformer
-        decoder_layer = torch.nn.TransformerEncoderLayer(d_latent, nhead=8, batch_first=True, norm_first=True, activation="gelu")
-        self.transformer = torch.nn.TransformerEncoder(decoder_layer, num_layers=4)
+        decoder_layer = torch.nn.TransformerEncoderLayer(d_latent, nhead=8, batch_first=True, norm_first=True, activation="gelu", dim_feedforward=1024)
+        self.transformer = torch.nn.TransformerEncoder(decoder_layer, num_layers=6)
 
         # output
         self.output_mlp = torch.nn.Linear(d_latent, self.volcab_size)
