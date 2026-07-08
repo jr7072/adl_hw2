@@ -18,7 +18,7 @@ class PositionalEmbedding(torch.nn.Module):
 
         super().__init__()
 
-        exponential = (torch.arange(0, embedding_size, 2) * -2) / embedding_size
+        exponential = -torch.arange(0, embedding_size, 2) / embedding_size
         freq_denom = torch.pow(10000, exponential)
         self.register_buffer('freq_denom', freq_denom)
     
@@ -79,14 +79,12 @@ class AutoregressiveModel(torch.nn.Module, Autoregressive):
         self.embeddings = torch.nn.Embedding(self.volcab_size, d_latent)
         self.positional_embeddings = PositionalEmbedding(d_latent)
         
-        self.bos_embedding = torch.nn.Parameter(torch.empty(1, 1, d_latent))
-        
-        # Fills the tensor in-place using a uniform distribution
-        torch.nn.init.xavier_uniform_(self.bos_embedding)
-
+        bos_embedding = torch.nn.Parameter(torch.zeros(1, 1, d_latent))
+        self.bos_embedding = torch.nn.init.kaiming_normal_(bos_embedding)
+    
         #  transformer
-        decoder_layer = torch.nn.TransformerEncoderLayer(d_latent, nhead=8, batch_first=True)
-        self.transformer = torch.nn.TransformerEncoder(decoder_layer, num_layers=6)
+        decoder_layer = torch.nn.TransformerEncoderLayer(d_latent, nhead=8, batch_first=True, norm_first=True, activation="gelu")
+        self.transformer = torch.nn.TransformerEncoder(decoder_layer, num_layers=4)
 
         # output
         self.output_mlp = torch.nn.Linear(d_latent, self.volcab_size)
@@ -96,8 +94,8 @@ class AutoregressiveModel(torch.nn.Module, Autoregressive):
         # flatten per batch
         x = x.flatten(start_dim=1)
 
-        # embed the tokens and add positional embeddings
-        x = self.embeddings(x) + self.positional_embeddings(x)
+        # embed the tokens
+        x = self.embeddings(x) 
 
         # expand bos embedding
         batch_size = x.size(dim=0)
@@ -105,6 +103,13 @@ class AutoregressiveModel(torch.nn.Module, Autoregressive):
 
         # shift the embeddings by 1, remove the last embedding
         x = torch.cat((bos_vectors, x[:, :-1, :]), dim=1)
+
+        # add positional embeddings
+        seq_tokens = torch.arange(0, 600).to(x.device)
+        positional_embedding = self.positional_embeddings(seq_tokens)
+        positional_embedding_batch = positional_embedding.expand(batch_size, -1, -1)
+
+        x += positional_embedding_batch
         
         # generate a look ahead mask for the inputs
         mask = torch.nn.Transformer.generate_square_subsequent_mask(
@@ -112,8 +117,9 @@ class AutoregressiveModel(torch.nn.Module, Autoregressive):
                                             ).to(
                                                 x.device
                                             )
+
         # pass it through transformer    
-        x = self.transformer(x, mask=mask, is_causal=True)
+        x = self.transformer(x, mask=mask)
 
         # get logits and reshape to image format
         logits = self.output_mlp(x).view(-1, 20, 30, self.volcab_size)
@@ -123,18 +129,38 @@ class AutoregressiveModel(torch.nn.Module, Autoregressive):
     def generate(self, B: int = 1, h: int = 20, w: int = 30, device=None) -> torch.Tensor:  # noqa
 
         batches = torch.tensor([]).to(device)
-    
-        for _ in range(B):
 
+        for _ in range(B):
+            
             grid = torch.full((h, w), 0).to(device)
 
             for h_idx in range(h):
 
                 for w_idx in range(w):
+                    
+                    with torch.no_grad():
+                        grid_probabilities = torch.nn.functional.softmax(self.forward(grid[None, :])[0], dim=-1)[0]
 
-                    grid_logits = self.forward(grid)[0]
-                    predictions = torch.squeeze(torch.argmax(grid_logits, dim=-1), dim=0)
-                    grid[h_idx, w_idx] = predictions[h_idx, w_idx]
+                    # do top p sampling
+                    top_p = .5
+
+                    # sort the probabilities
+                    grid_probabilities, token_grid = torch.sort(grid_probabilities, dim=-1, descending=True)
+                    grid_cum_probs = torch.cumsum(grid_probabilities, dim=-1)
+
+                    next_tokens = token_grid[h_idx][w_idx]
+                    next_token_cum_prob = grid_cum_probs[h_idx][w_idx]
+                    
+                    valid_next_token_len = (next_token_cum_prob <= top_p).sum().item()
+                    if not valid_next_token_len:
+                        valid_next_token_len = 1
+
+                    next_token = next_tokens[torch.randint(0, valid_next_token_len, (1,))].item()
+
+                    # print(next_token, end=" ", flush=True)
+                    grid[h_idx][w_idx] = next_token
+
+                # print()
             
             if batches.size(dim=0) == 0:
         
